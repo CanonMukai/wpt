@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<head>
+  <script src="/resources/testharness.js"></script>
+  <script src="/resources/testharnessreport.js"></script>
+</head>
+<body>
+<iframe id="frame" src="about:blank"></iframe>
+<a id="anchor" href="#"></a>
+<script>
+  // Build a javscript:-URL that will post a message when executed, and will
+  // post a second message when its result value is executed.
+  // The last line contains a combo-breaker to prevent the HTML parser from
+  // reading it as the end of this sript block.
+  const js_url = "javascript:" +
+      "window.opener.postMessage('flag no. 1','*');" +
+      "'<script>" +
+      "window.opener.postMessage(\"flag no. 2\", \"*\");" +
+      "</scri" + "pt>'";
+
+  function expectMessage(str) {
+    return new Promise(resolve => {
+      window.addEventListener("message", e => {
+        if (e.data && e.data.includes(str)) resolve();
+      });
+    });
+  }
+
+  promise_test(t => {
+    const win = window.open("about:blank");
+    const anchor = win.document.createElement("a");
+    win.document.body.appendChild(anchor);
+
+    anchor.href = js_url;
+    anchor.click();
+    return Promise.all([expectMessage("flag no. 1"),
+                        expectMessage("flag no. 2")]);
+  }, "Navigate a.href with javascript:-url and without a policy works");
+
+  promise_test(t => {
+    // We need to inject our test into a separate window, so that the
+    // (successful) navigation won't navigate away from our test page.
+    const win = window.open("about:blank");
+    const anchor = win.document.createElement("a");
+    win.document.body.appendChild(anchor);
+    win.trustedTypes.createPolicy("default", {
+        createScript: s => s.replace("flag", "flog")
+    });
+
+    anchor.href = js_url;
+    anchor.click();
+    return Promise.all([expectMessage("flog no. 1"),
+                        expectMessage("flag no. 2")]);
+  }, "Navigate a.href with javascript:-url and default policy");
+
+  promise_test(t => {
+    const win = window.open("about:blank");
+    const anchor = win.document.createElement("a");
+    win.document.body.appendChild(anchor);
+    win.trustedTypes.createPolicy("default", {
+        createScript: s => undefined
+    });
+
+    anchor.href = js_url;
+    anchor.click();
+    return Promise.all([expectMessage("flag no. 1"),
+                        expectMessage("flag no. 2")]);
+  }, "Navigate a.href with javascript:-url and default policy rejects");
+</script>
+</body>

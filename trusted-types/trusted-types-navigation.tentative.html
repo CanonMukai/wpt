@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<head>
+  <script src="/resources/testharness.js"></script>
+  <script src="/resources/testharnessreport.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="trusted-types *">
+</head>
+<body>
+<a id="anchor" href="#"></a>
+<script>
+  function expectMessage(str) {
+    return new Promise(resolve => {
+      window.addEventListener("message", e => {
+        if (e.data && e.data.includes(str)) resolve();
+      });
+    });
+  }
+
+  function expectViolation(doc) {
+    return new Promise(resolve => {
+      doc.addEventListener("securitypolicyviolation", e => {
+        if (e.effectiveDirective == "trusted-types") resolve();
+      });
+    });
+  }
+
+  var flag = 0;
+  const anchor = document.getElementById("anchor");
+  promise_test(t => {
+    flag = 0;
+    anchor.href = "javascript:window.top.flag=7;'#'";
+    anchor.click();
+    return expectViolation(window.document).then(_ => assert_equals(flag, 0));
+  }, "Navigate a.href with javascript:-url is blocked.");
+
+  promise_test(t => {
+    // We need to inject our test into a separate window, so that the
+    // (successful) navigation won't navigate away from our test page.
+    const win = window.open("about:blank");
+    const anchor = win.document.createElement("a");
+    win.document.body.appendChild(anchor);
+    win.trustedTypes.createPolicy("default", {
+        createScript: s => s.replace("flag", "flog")
+    });
+
+    // Build a javscript:-URL that will post a message when executed, and will
+    // post a second message when its result value is executed.
+    // The last line contains a combo-breaker to prevent the HTML parser from
+    // reading it as the end of this sript block.
+    var url = "javascript:" +
+        "window.opener.postMessage('flag no. 1','*');" +
+        "'<script>" +
+        "window.opener.postMessage(\"flag no. 2\", \"*\");" +
+        "</scri" + "pt>'";
+
+    anchor.href = url;
+    anchor.click();
+    return Promise.all([expectMessage("flog no. 1"),
+                        expectMessage("flag no. 2")]);
+  }, "Navigate a.href with javascript:-url and default policy");
+</script>
+</body>
