@@ -175,6 +175,7 @@ var WebNFCTest = (() => {
       this.client_ = null;
       this.watchers_ = [];
       this.reading_messages_ = [];
+      this.operations_suspended_ = false;
     }
 
     // NFC delegate functions
@@ -192,9 +193,12 @@ var WebNFCTest = (() => {
 
       return new Promise(resolve => {
         this.pending_promise_func_ = resolve;
-        if (options.timeout && options.timeout !== Infinity &&
+        // Pend push operation if NFC operation is suspended
+        if (this.operations_suspended_) {
+          // Do nothing, pends push operation.
+        } else if (options.timeout && options.timeout !== Infinity &&
             !this.push_completed_) {
-          // Resolve with TimeoutError, else pending push operation.
+          // Resolve with TimeoutError, else pend push operation.
           if (this.push_should_timeout_) {
             resolve(
                 createNFCError(device.mojom.NFCErrorType.TIMER_EXPIRED));
@@ -226,11 +230,14 @@ var WebNFCTest = (() => {
       }
 
       this.watchers_.push({id: id, options: options});
-      // Triggers onWatch if the new watcher matches existing messages
-      for (let message of this.reading_messages_) {
-        if (matchesWatchOptions(message, options)) {
-          this.client_.onWatch(
-              [id], fake_tag_serial_number, toMojoNDEFMessage(message));
+      // Ignore reading if NFC operation is suspended
+      if(!this.operations_suspended_) {
+        // Triggers onWatch if the new watcher matches existing messages
+        for (let message of this.reading_messages_) {
+          if (matchesWatchOptions(message, options)) {
+            this.client_.onWatch(
+                [id], fake_tag_serial_number, toMojoNDEFMessage(message));
+          }
         }
       }
 
@@ -290,6 +297,7 @@ var WebNFCTest = (() => {
       this.push_completed_ = true;
       this.watchers_ = [];
       this.reading_messages_ = [];
+      this.operations_suspended_ = false;
       this.cancelPendingPushOperation();
       this.bindingSet_.closeAllBindings();
       this.interceptor_.stop();
@@ -311,6 +319,8 @@ var WebNFCTest = (() => {
     // Sets message that is used to deliver NFC reading updates.
     setReadingMessage(message) {
       this.reading_messages_.push(message);
+      // Ignore reading if NFC operation is suspended
+      if(this.operations_suspended_) return;
       // Ignore reading if NFCPushOptions.ignoreRead is true
       if(this.push_options_ && this.push_options_.ignoreRead)
         return;
@@ -326,6 +336,31 @@ var WebNFCTest = (() => {
 
     setPushShouldTimeout(result) {
       this.push_should_timeout_ = result;
+    }
+
+    // Suspends all pending NFC operations. Could be used when web page
+    // visibility is lost.
+    suspendNFCOperations() {
+      this.operations_suspended_ = true;
+    }
+
+    // Resumes all suspended NFC operations.
+    resumeNFCOperations() {
+      this.operations_suspended_ = false;
+      // Resumes pending NFC reading
+      for (let watcher of this.watchers_) {
+        for (let message of this.reading_messages_) {
+          if (matchesWatchOptions(message, watcher.options)) {
+            this.client_.onWatch(
+                [watcher.id], fake_tag_serial_number,
+                toMojoNDEFMessage(message));
+          }
+        }
+      }
+      // Resumes pending push operation
+      if (this.pending_promise_func_) {
+        this.pending_promise_func_(createNFCError(null));
+      }
     }
   }
 

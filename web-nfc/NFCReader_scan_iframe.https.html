@@ -28,7 +28,9 @@ nfc_test(async (t, mockNFC) => {
   // Focus on iframe
   iframe.contentWindow.document.getElementById('foo').focus();
   assert_true(iframe.contentDocument.hasFocus(), 'iframe gains the focus');
-
+  // Suspend NFC operations is async in blink, use setTimeout as a workaround
+  // TODO: find a good way to eliminate this race condition
+  await new Promise(resolve => t.step_timeout(resolve, 0));
   mockNFC.setReadingMessage(createMessage([createTextRecord(test_text_data)]));
   await promise;
 
